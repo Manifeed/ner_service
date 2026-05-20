@@ -1,0 +1,175 @@
+name: release
+
+on:
+  pull_request:
+    paths:
+      - "app/**"
+      - "tests/**"
+      - "Dockerfile"
+      - "Dockerfile.base"
+      - "docker-compose.yml"
+      - "docker-compose.release.yml"
+      - "Makefile"
+      - "requirements.txt"
+      - "requirements-dev.txt"
+      - "README.md"
+      - ".env.example"
+      - ".github/workflows/release.yml"
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Version tag to publish when running manually (for example v1.2.3)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  BASE_IMAGE_NAME: ghcr.io/manifeed/ner_service-base
+  SERVICE_IMAGE_NAME: ghcr.io/manifeed/ner_service
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run test suite
+        run: make test
+
+  build-base-and-push:
+    name: Build and Push Base Image
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      version_tag: ${{ steps.version.outputs.version_tag }}
+      base_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve version tag
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION_TAG: ${{ github.event.inputs.version_tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            version_tag="${GITHUB_REF_NAME}"
+          else
+            version_tag="${INPUT_VERSION_TAG}"
+          fi
+          if [[ -z "${version_tag}" || "${version_tag}" != v* ]]; then
+            printf '%s\n' 'A version tag starting with v is required.' >&2
+            exit 1
+          fi
+          echo "version_tag=${version_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate base image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.BASE_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version_tag }}
+            type=raw,value=latest
+
+      - name: Build and push base image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.base
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+
+  build-service-and-push:
+    name: Build and Push Service Image
+    needs: build-base-and-push
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate service image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.SERVICE_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.build-base-and-push.outputs.version_tag }}
+            type=raw,value=latest
+
+      - name: Build and push service image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: |
+            SERVICE_BASE_IMAGE=${{ env.BASE_IMAGE_NAME }}@${{ needs.build-base-and-push.outputs.base_digest }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+
+  release-summary:
+    name: Release Summary
+    needs: [build-base-and-push, build-service-and-push]
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish summary
+        env:
+          VERSION_TAG: ${{ needs.build-base-and-push.outputs.version_tag }}
+          BASE_IMAGE_NAME: ${{ env.BASE_IMAGE_NAME }}
+          SERVICE_IMAGE_NAME: ${{ env.SERVICE_IMAGE_NAME }}
+          BASE_DIGEST: ${{ needs.build-base-and-push.outputs.base_digest }}
+          SERVICE_DIGEST: ${{ needs.build-service-and-push.outputs.digest }}
+        shell: bash
+        run: |
+          {
+            echo "## Published Images"
+            echo
+            echo "- Base: \`${BASE_IMAGE_NAME}:${VERSION_TAG}\`"
+            echo "- Base digest: \`${BASE_DIGEST}\`"
+            echo "- Service: \`${SERVICE_IMAGE_NAME}:${VERSION_TAG}\`"
+            echo "- Service latest: \`${SERVICE_IMAGE_NAME}:latest\`"
+            echo "- Service digest: \`${SERVICE_DIGEST}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

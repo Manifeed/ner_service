@@ -1,6 +1,5 @@
-fastapi==0.135.2
-uvicorn==0.27.1
-pydantic==2.11.9
-gliner==0.2.22
-transformers==4.51.0
-pytest==8.3.5
+fastapi==0.136.1
+uvicorn==0.46.0
+pydantic==2.13.4
+transformers==5.5.4
+gliner==0.2.26

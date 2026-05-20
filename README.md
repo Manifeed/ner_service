@@ -1,67 +1,74 @@
 # Manifeed NER Service
 
-`ner_service` is the internal named-entity recognition worker for Manifeed.
+GPU-backed standalone NER service built around GLiNER. It exposes:
 
-It exposes a FastAPI API that extracts entities from article titles and
-summaries using a pre-baked [GLiNER](https://github.com/urchade/GLiNER) model.
-Entity labels are derived from article themes plus a shared core label set.
+- `POST /v1/entities`
+- `POST /v1/entities/batch`
+- `GET /internal/health`
+- `GET /internal/ready`
 
-This service is not browser-facing. It is meant to run inside the backend
-platform and is consumed by `indexer_service` and other internal workers.
-
-## Responsibilities
-
-- Extract named entities from article title and summary text
-- Resolve NER labels from article themes (politics, technology, sports, etc.)
-- Expose internal health and readiness endpoints
-- Authenticate callers with a shared API key
-
-## Service Endpoints
-
-- `GET /internal/health`: process-level liveness check
-- `GET /internal/ready`: verifies the GLiNER model is loaded and available
-- `POST /v1/entities`: entity extraction (requires Bearer token)
-
-## Architecture Overview
-
-- [app/main.py](./app/main.py): FastAPI bootstrap and health routes
-- [app/routers/ner_router.py](./app/routers/ner_router.py): `/v1/entities` route
-- [app/services/ner_service.py](./app/services/ner_service.py): extraction orchestration
-- [app/services/gliner_runtime.py](./app/services/gliner_runtime.py): GLiNER model lifecycle
-- [app/services/label_service.py](./app/services/label_service.py): theme-to-label mapping
-- [app/domain/config.py](./app/domain/config.py): runtime configuration resolution
+The service batches requests internally, warms the model once per process, and
+adapts batch defaults to detected GPU memory. It is intentionally standalone
+and can run on a separate GPU host from the rest of Manifeed.
 
 ## Quick Start
 
-### 1. Install dependencies
-
 ```bash
-python3 -m pip install -r requirements.txt
+cp .env.example .env
+make build-base
+make up
 ```
 
-### 2. Export a minimal local environment
+The service listens on `http://localhost:8002` by default.
+
+## Common Commands
 
 ```bash
-export NER_SERVICE_API_KEY='replace-with-local-service-key'
-export GLINER_MODEL_PATH='/opt/models/gliner'
-export NER_DEVICE='cuda'
+make build-base
+make build
+make up
+make down
+make clean
+make test
+make release-pull
+make release-up
 ```
 
-For CPU-only local experiments (slower, not recommended for production):
+## Release Images
 
-```bash
-export NER_DEVICE='cpu'
-```
+GitHub Actions publishes two images on tags matching `v*`:
 
-### 3. Run the service
+- `ghcr.io/manifeed/ner_service-base:<tag>`
+- `ghcr.io/manifeed/ner_service:<tag>`
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
+The final image is always built from the base image digest produced by the same
+workflow run.
 
-## API
+## Configuration
 
-### Request
+- `NER_SERVICE_API_KEY`: bearer token for inference endpoints
+- `GLINER_MODEL_ID`: model id downloaded at base-image build time
+- `GLINER_MODEL_PATH`: in-container model path
+- `NER_DEVICE`: `cuda` or `cpu`
+- `NER_THRESHOLD`: GLiNER confidence threshold
+- `NER_BATCH_MAX_ITEMS`: explicit batch item cap
+- `NER_BATCH_MAX_TOKENS`: explicit batch token cap
+- `NER_BATCH_MAX_WAIT_MS`: queue flush delay
+- `NER_QUEUE_MAX_ITEMS`: bounded queue size before `503 overloaded`
+- `NER_REQUEST_TIMEOUT_SECONDS`: max wait for a request result
+- `NER_SHUTDOWN_GRACE_SECONDS`: graceful stop budget
+- `NER_GPU_MEMORY_FRACTION`: per-process CUDA memory budget, default `0.25`
+
+If `NER_BATCH_MAX_ITEMS` and `NER_BATCH_MAX_TOKENS` are not set, the service
+chooses defaults from detected VRAM:
+
+- `<=8GB`: `4 items / 1024 tokens`
+- `<=16GB`: `12 items / 3072 tokens`
+- `>16GB`: `24 items / 6144 tokens`
+
+## API Examples
+
+Single request:
 
 ```json
 {
@@ -73,79 +80,32 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 }
 ```
 
-### Response
+Batch request:
 
 ```json
 {
-  "entities": [
+  "items": [
     {
-      "label": "PERSON",
-      "text": "Ada Lovelace",
-      "score": 0.91,
-      "start_offset": 0,
-      "end_offset": 13
+      "article_id": 42,
+      "title": "Ada Lovelace launches a software startup",
+      "summary": "The company focuses on developer tools.",
+      "language": "en",
+      "themes": ["technology"]
     }
   ]
 }
 ```
 
-### `curl` example
+## Failure Modes
 
-```bash
-curl http://127.0.0.1:8000/v1/entities \
-  -H "Authorization: Bearer ${NER_SERVICE_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "article_id": 1,
-    "title": "Ada Lovelace launches a software startup",
-    "summary": null,
-    "language": "en",
-    "themes": ["technology"]
-  }'
-```
+- `503 warming_up`
+- `503 overloaded`
+- `503 stopping`
+- `503 request_timeout`
+- `503 ner_model_unavailable`
 
-## Configuration
+## Integration Notes
 
-Core settings used by the service:
-
-- `NER_SERVICE_API_KEY`: required Bearer token for `/v1/entities`
-- `GLINER_MODEL_PATH`: on-disk model directory (default `/opt/models/gliner`)
-- `GLINER_MODEL_ID`: Hugging Face model id used at image build time
-- `NER_DEVICE`: inference device (`cuda` or `cpu`, default `cuda`)
-
-## Tests
-
-Run the test suite with:
-
-```bash
-pytest -q
-```
-
-Tests use a fake GLiNER model and do not require GPU access.
-
-## Docker
-
-Build from the repository root:
-
-```bash
-docker build -t manifeed-ner-service .
-```
-
-Run (requires NVIDIA GPU in production):
-
-```bash
-docker run --rm --gpus all -p 8000:8000 \
-  -e NER_SERVICE_API_KEY='replace-with-strong-secret' \
-  -e NER_DEVICE='cuda' \
-  manifeed-ner-service
-```
-
-The image pre-downloads the GLiNER model at build time and runs offline at
-runtime (`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`).
-
-## Manifeed Integration
-
-In the Manifeed `infra` stack, this service is referenced as `ner_service` and
-is reached by `indexer_service` through `NER_SERVICE_URL`. Clone this
-repository next to the main platform checkout and point
-`NER_SERVICE_REPO_PATH` to it when building with Docker Compose.
+- `indexer_service` now uses `POST /v1/entities/batch` by default.
+- `infra` should consume this service strictly through `NER_SERVICE_URL` and
+  `NER_SERVICE_API_KEY`.

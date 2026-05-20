@@ -1,0 +1,36 @@
+services:
+  ner_service:
+    image: ghcr.io/manifeed/ner_service:${NER_SERVICE_IMAGE_TAG:-latest}
+    pull_policy: always
+    container_name: ${NER_SERVICE_CONTAINER_NAME:-ner_service}
+    ports:
+      - "${NER_SERVICE_PORT:-8002}:8000"
+    environment:
+      NER_SERVICE_API_KEY: ${NER_SERVICE_API_KEY:-}
+      GLINER_MODEL_PATH: ${GLINER_MODEL_PATH:-/opt/models/gliner}
+      GLINER_MODEL_ID: ${GLINER_MODEL_ID:-urchade/gliner_multi-v2.1}
+      NER_DEVICE: ${NER_DEVICE:-cuda}
+      NER_THRESHOLD: ${NER_THRESHOLD:-0.5}
+      NER_BATCH_MAX_ITEMS: ${NER_BATCH_MAX_ITEMS:-}
+      NER_BATCH_MAX_TOKENS: ${NER_BATCH_MAX_TOKENS:-}
+      NER_BATCH_MAX_WAIT_MS: ${NER_BATCH_MAX_WAIT_MS:-5}
+      NER_QUEUE_MAX_ITEMS: ${NER_QUEUE_MAX_ITEMS:-1024}
+      NER_REQUEST_TIMEOUT_SECONDS: ${NER_REQUEST_TIMEOUT_SECONDS:-300}
+      NER_SHUTDOWN_GRACE_SECONDS: ${NER_SHUTDOWN_GRACE_SECONDS:-30}
+      NER_GPU_MEMORY_FRACTION: ${NER_GPU_MEMORY_FRACTION:-0.25}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+    gpus: all
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/health').read()\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
