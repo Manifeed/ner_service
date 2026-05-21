@@ -80,6 +80,9 @@ Single request:
 }
 ```
 
+`language` accepts ISO 639 alpha-2 and alpha-3 codes such as `en`, `fr`, or
+`arz`. Incoming values are normalized with trimming and lowercase conversion.
+
 Batch request:
 
 ```json

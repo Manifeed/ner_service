@@ -15,7 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NER_DEVICE=cuda \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    HF_HOME=/tmp/huggingface
+    HF_HOME=/opt/models/huggingface
 
 RUN useradd --create-home --home-dir /home/appuser --shell /usr/sbin/nologin appuser
 
@@ -29,14 +29,18 @@ from gliner import GLiNER
 
 model_id = os.environ["GLINER_MODEL_ID"]
 model_path = os.environ["GLINER_MODEL_PATH"]
+base_tokenizer_model = "microsoft/mdeberta-v3-base"
 
+os.makedirs(os.environ["HF_HOME"], exist_ok=True)
 snapshot_download(repo_id=model_id, local_dir=model_path)
+snapshot_download(repo_id=base_tokenizer_model)
 GLiNER.from_pretrained(model_path)
 PY
 
 ENV HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HOME=/opt/models/huggingface
 
 RUN find /opt/conda -type d \( -name __pycache__ -o -name tests -o -name test \) -prune -exec rm -rf '{}' + \
     && find /opt/conda -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
-    && rm -rf /opt/conda/pkgs /root/.cache /tmp/requirements.txt /tmp/huggingface
+    && rm -rf /opt/conda/pkgs /root/.cache /tmp/requirements.txt

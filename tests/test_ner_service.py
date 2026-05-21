@@ -43,7 +43,7 @@ def test_create_entities_batch_maps_entities_by_item_order(monkeypatch) -> None:
                     article_id=2,
                     title="Budget vote in parliament",
                     summary=None,
-                    language="fr",
+                    language=" fr ",
                     themes=["politics"],
                 ),
             ]
@@ -53,6 +53,18 @@ def test_create_entities_batch_maps_entities_by_item_order(monkeypatch) -> None:
     assert [item.article_id for item in response.data] == [1, 2]
     assert requests_seen[0].labels == tuple(resolve_ner_labels(["technology"]))
     assert requests_seen[1].labels == tuple(resolve_ner_labels(["politics"]))
+
+
+def test_ner_request_schema_accepts_three_letter_iso_language_codes() -> None:
+    request = NerRequestSchema(
+        article_id=3,
+        title="Arabic article",
+        summary=None,
+        language="ARZ",
+        themes=[],
+    )
+
+    assert request.language == "arz"
 
 
 def test_resolve_ner_device_defaults_to_cuda(monkeypatch) -> None:

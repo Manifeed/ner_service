@@ -129,7 +129,7 @@ def test_entities_batch_route_returns_payload(monkeypatch) -> None:
                     "article_id": 42,
                     "title": "Ada",
                     "summary": None,
-                    "language": "en",
+                    "language": "ARZ",
                     "themes": ["technology"],
                 }
             ]
@@ -138,6 +138,36 @@ def test_entities_batch_route_returns_payload(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["data"][0]["article_id"] == 42
+
+
+def test_entities_batch_route_normalizes_padded_iso_language_codes(monkeypatch) -> None:
+    _patch_runtime_client(monkeypatch)
+    seen = {}
+
+    def fake_create_entities_batch(payload):
+        seen["language"] = payload.items[0].language
+        return NerBatchResponseRead(data=[{"index": 0, "article_id": 42, "entities": []}])
+
+    monkeypatch.setattr("app.routers.ner_router.create_entities_batch", fake_create_entities_batch)
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/entities/batch",
+        json={
+            "items": [
+                {
+                    "article_id": 42,
+                    "title": "Ada",
+                    "summary": None,
+                    "language": "fr ",
+                    "themes": ["technology"],
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen["language"] == "fr"
 
 
 def test_entities_route_returns_specific_service_errors(monkeypatch) -> None:
