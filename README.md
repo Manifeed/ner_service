@@ -2,7 +2,6 @@
 
 GPU-backed standalone NER service built around GLiNER. It exposes:
 
-- `POST /v1/entities`
 - `POST /v1/entities/batch`
 - `GET /internal/health`
 - `GET /internal/ready`
@@ -68,22 +67,7 @@ chooses defaults from detected VRAM:
 
 ## API Examples
 
-Single request:
-
-```json
-{
-  "article_id": 42,
-  "title": "Ada Lovelace launches a software startup",
-  "summary": "The company focuses on developer tools.",
-  "language": "en",
-  "themes": ["technology"]
-}
-```
-
-`language` accepts ISO 639 alpha-2 and alpha-3 codes such as `en`, `fr`, or
-`arz`. Incoming values are normalized with trimming and lowercase conversion.
-
-Batch request:
+Batch request (single-item batches are supported):
 
 ```json
 {
@@ -91,13 +75,14 @@ Batch request:
     {
       "article_id": 42,
       "title": "Ada Lovelace launches a software startup",
-      "summary": "The company focuses on developer tools.",
-      "language": "en",
-      "themes": ["technology"]
+      "summary": "The company focuses on developer tools."
     }
   ]
 }
 ```
+
+Entity labels are fixed: `PERSON`, `ORGANIZATION`, `COMPANY`, `LOCATION`, `DATE`,
+`EVENT`, `PRODUCT`, `TECHNOLOGY`, `CURRENCY`.
 
 ## Failure Modes
 

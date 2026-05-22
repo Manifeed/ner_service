@@ -73,9 +73,6 @@ class GlinerClient:
             self._transition_state_locked(NerRuntimeState.STOPPED, reason="shutdown_completed")
             self._condition.notify_all()
 
-    def extract(self, request: NerInferenceRequest) -> list[NerEntityRead]:
-        return self.extract_batch([request])[0]
-
     def extract_batch(self, requests: list[NerInferenceRequest]) -> list[list[NerEntityRead]]:
         if not requests:
             return []
