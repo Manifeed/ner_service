@@ -11,9 +11,9 @@ ner_router = APIRouter(prefix="/v1", tags=["entities"])
 
 
 @ner_router.post(
-	"/entities/batch",
-	response_model=NerBatchResponseRead,
-	dependencies=[Depends(require_ner_service_api_key_auth)],
+    "/entities/batch",
+    response_model=NerBatchResponseRead,
+    dependencies=[Depends(require_ner_service_api_key_auth)],
 )
 def read_entities_batch(payload: NerBatchRequestSchema) -> NerBatchResponseRead:
-	return create_entities_batch(payload)
+    return create_entities_batch(payload)
